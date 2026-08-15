@@ -43,18 +43,29 @@ def _fast_load_torch_file(ckpt, safe_load=False, device=None, return_metadata=Fa
 
 comfy.utils.load_torch_file = _fast_load_torch_file
 
-# 2. ModelPatcher GC Resilience Patch
+# 2. ModelPatcher & Quantized Memory Offload GC Resilience Patch
 _original_detach = comfy.model_patcher.ModelPatcher.detach
 
 def _safe_detach(self, unpatch_all=True):
+    if torch.cuda.is_available():
+        try:
+            torch.cuda.synchronize()
+        except Exception:
+            pass
     self.eject_model()
     self.model_patches_to(self.offload_device)
     if unpatch_all:
-        self.unpatch_model(self.offload_device, unpatch_weights=unpatch_all)
+        try:
+            self.unpatch_model(self.offload_device, unpatch_weights=unpatch_all)
+        except Exception:
+            pass
     callbacks_mp = getattr(comfy.model_patcher, 'CallbacksMP', None)
     if callbacks_mp is not None:
         for callback in self.get_all_callbacks(callbacks_mp.ON_DETACH):
-            callback(self, unpatch_all)
+            try:
+                callback(self, unpatch_all)
+            except Exception:
+                pass
     return self.model
 
 comfy.model_patcher.ModelPatcher.detach = _safe_detach
@@ -63,12 +74,56 @@ _original_del = getattr(comfy.model_patcher.ModelPatcher, '__del__', None)
 
 def _safe_del(self):
     try:
+        if torch.cuda.is_available():
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
         self.unpin_all_weights()
         self.detach(unpatch_all=False)
     except Exception:
         pass
 
 comfy.model_patcher.ModelPatcher.__del__ = _safe_del
+
+# Safe Quantized Module Device Transfer (prevents Windows access violations when offloading INT8/FP8 weights)
+try:
+    import comfy.ops
+    _orig_quant_apply = getattr(comfy.ops, '_quantized_apply', None)
+    if _orig_quant_apply is not None:
+        def _safe_quantized_apply(module, fn, recurse=True):
+            if torch.cuda.is_available():
+                try:
+                    torch.cuda.synchronize()
+                except Exception:
+                    pass
+            if recurse:
+                for child in module.children():
+                    child._apply(fn)
+            for key, param in module._parameters.items():
+                if param is None:
+                    continue
+                try:
+                    p = fn(param)
+                except Exception:
+                    try:
+                        p = param.detach().clone().cpu()
+                    except Exception:
+                        p = param
+                if (not torch.is_inference_mode_enabled()) and p.is_inference():
+                    p = p.clone()
+                module.register_parameter(key, torch.nn.Parameter(p, requires_grad=False))
+            for key, buf in module._buffers.items():
+                if buf is not None:
+                    try:
+                        module._buffers[key] = fn(buf)
+                    except Exception:
+                        pass
+            return module
+
+        comfy.ops._quantized_apply = _safe_quantized_apply
+except Exception:
+    pass
 
 # 3. Safe Video Batch Resizer (prevents numpy._ArrayMemoryError when scaling video batches at 2K)
 _original_lanczos = getattr(comfy.utils, 'lanczos', None)
