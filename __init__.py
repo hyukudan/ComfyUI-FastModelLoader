@@ -147,6 +147,29 @@ def _safe_lanczos(samples, width, height):
 if _original_lanczos is not None:
     comfy.utils.lanczos = _safe_lanczos
 
+# 4. Update-Proof Model Architecture Detection Patch (detects LTX 2.5 22B cross_attention_adaln & audio channels)
+try:
+    import comfy.model_detection
+    _orig_detect_unet_config = getattr(comfy.model_detection, 'detect_unet_config', None)
+    if _orig_detect_unet_config is not None:
+        def _safe_detect_unet_config(state_dict, key_prefix, metadata=None):
+            dit_config = _orig_detect_unet_config(state_dict, key_prefix, metadata=metadata)
+            if dit_config is not None and isinstance(dit_config, dict):
+                if dit_config.get("image_model") in ("ltxv", "ltxav"):
+                    adaln_bias_key = f"{key_prefix}adaln_single.linear.bias"
+                    if adaln_bias_key in state_dict:
+                        bias_len = state_dict[adaln_bias_key].shape[0]
+                        dit_config["cross_attention_adaln"] = (bias_len == 36864 or bias_len > 24576)
+
+                    conn_key = f"{key_prefix}audio_embeddings_connector.learnable_registers"
+                    if conn_key in state_dict:
+                        dit_config["caption_channels"] = state_dict[conn_key].shape[-1]
+            return dit_config
+
+        comfy.model_detection.detect_unet_config = _safe_detect_unet_config
+except Exception:
+    pass
+
 logger.info("[ComfyUI-FastModelLoader] Direct pread I/O streaming, GC resilience & Safe Video Resizer active.")
 
 try:
