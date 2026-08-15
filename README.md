@@ -16,7 +16,7 @@ In standard everyday workflows with single 2–4 GB checkpoints (SD 1.5, SDXL), 
 However, in **advanced multi-stage video workflows** with modern **15–20 GB models** (such as 2-stage Outpainting, Reference-to-Video, or complex pipelines chaining Text Encoders + DiT + Audio/Video VAE + Frame Interpolation / Upscaling), ComfyUI continuously **swaps, offloads, and reloads** massive tensors between VRAM, system RAM, and disk.
 
 Under these specific high-pressure conditions on Windows:
-1. **The `mmap` Lazy Loading Trap:** Default Python `safe_open` uses memory mapping (`mmap`). While `mmap` appears to return in 0.01 seconds, it does not actually load the data into memory—it only creates virtual memory address pointers. When PyTorch subsequently accesses tensor slices during heavy GPU compute, Windows kernel page faults trigger instant Access Violations (`0xc0000005` in `torch.storage.UntypedStorage.__getitem__`).
+1. **Memory-Mapped Page Faults:** Default Python `safe_open` relies on Windows virtual memory mapping (`mmap`). When the OS manages 40–80 GB of active tensors and swaps weights, Windows memory-mapped page pointers can desynchronize, causing an Access Violation (`0xc0000005` in `torch.storage.UntypedStorage.__getitem__`).
 2. **Garbage Collection Race Conditions:** When a 15–20 GB model is evicted from VRAM to make room for the next stage (e.g. DiT -> VAE decode -> Stage 2 Upscaler), Python's garbage collector unpinning hooks can trigger null-pointer edge cases during model detachment.
 3. **CPU Video Resize Heap Fragmentation:** Processing full 2K/4K video frame batches with CPU Lanczos can exhaust the NumPy heap (`numpy._core._exceptions._ArrayMemoryError`).
 
@@ -65,18 +65,16 @@ Restart ComfyUI. The extension automatically activates on startup and protects a
 
 ---
 
-## 📊 Benchmark: Real Measurements on Windows 11
+## 📊 Measured Load Performance on Windows 11
 
 Measured on Intel Core i7-13700K, NVMe PCIe 4.0 SSD, NVIDIA RTX PRO 6000 Blackwell:
 
-| Model File | File Size | Standard `mmap` Loading | `FastModelLoader` (pread Direct I/O) | Multi-Stage Execution Stability |
+| Model File | File Size | Load Time (FastModelLoader) | Direct I/O Bandwidth | Multi-Stage Execution |
 | :--- | :--- | :--- | :--- | :--- |
-| **MiniMax H3 DiT INT8** | 19.53 GB | Deferred (0.01s lazy pointer) | **7.37 s** (2,713 MB/s sustained) | ✅ **100% Stable** (vs `0xc0000005` crash) |
-| **Gemma 4 LTX Text Encoder** | 14.32 GB | Deferred (0.02s lazy pointer) | **5.43 s** (2,700 MB/s sustained) | ✅ **100% Stable** |
-| **ACE-Step XL Base** | 9.29 GB | Deferred (0.12s lazy pointer) | **4.32 s** (2,200 MB/s sustained) | ✅ **100% Stable** |
-| **T5 XXL FP8** | 4.56 GB | Deferred (0.04s lazy pointer) | **2.32 s** (2,011 MB/s sustained) | ✅ **100% Stable** |
-
-> **Note on `mmap` vs `pread`:** `mmap` appears instantaneous because it does not read data into RAM up-front. However, in heavy pipelines, deferred page reads on Windows desynchronize under VRAM pressure, causing random crash exceptions. `pread` streams all bytes contiguously into memory at ~2.7 GB/s, making execution completely reliable.
+| **MiniMax H3 DiT INT8** | 19.53 GB | **7.37 s** | 2,713 MB/s (~2.7 GB/s) | ✅ **100% Stable** (no `0xc0000005` crash) |
+| **Gemma 4 LTX Text Encoder** | 14.32 GB | **5.43 s** | 2,700 MB/s (~2.7 GB/s) | ✅ **100% Stable** |
+| **ACE-Step XL Base** | 9.29 GB | **4.32 s** | 2,200 MB/s (~2.2 GB/s) | ✅ **100% Stable** |
+| **T5 XXL FP8** | 4.56 GB | **2.32 s** | 2,011 MB/s (~2.0 GB/s) | ✅ **100% Stable** |
 
 ---
 
