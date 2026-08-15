@@ -1,5 +1,5 @@
 """
-ComfyUI-FastModelLoader: High-Speed Streaming Safetensors Loader, Memory Resilience & Safe Video Resizer
+ComfyUI-FastModelLoader: High-Speed Streaming Safetensors Loader, Memory Resilience & Outpaint Tools
 Copyright (c) 2026 hyukudan
 Licensed under the MIT License
 """
@@ -74,7 +74,6 @@ comfy.model_patcher.ModelPatcher.__del__ = _safe_del
 _original_lanczos = getattr(comfy.utils, 'lanczos', None)
 
 def _safe_lanczos(samples, width, height):
-    # For video batches (>8 frames) or high-res, use PyTorch GPU bicubic to prevent CPU PIL/NumPy heap exhaustion
     if samples.shape[0] > 8 or (samples.shape[-1] * samples.shape[-2] > 1024 * 1024):
         s = samples if samples.shape[1] in (1, 3, 4) else samples.movedim(-1, 1)
         out = torch.nn.functional.interpolate(s, size=(height, width), mode="bicubic", align_corners=False)
@@ -95,18 +94,27 @@ if _original_lanczos is not None:
 
 logger.info("[ComfyUI-FastModelLoader] Direct pread I/O streaming, GC resilience & Safe Video Resizer active.")
 
-from .fast_loader_nodes import FastModelLoader, FastDiffusionModelLoader, OutpaintDirectionalPad
+try:
+    from .fast_loader_nodes import FastModelLoader, FastDiffusionModelLoader, OutpaintDirectionSelector, OutpaintDirectionalPad
 
-NODE_CLASS_MAPPINGS = {
-    "FastModelLoader": FastModelLoader,
-    "FastDiffusionModelLoader": FastDiffusionModelLoader,
-    "OutpaintDirectionalPad": OutpaintDirectionalPad,
-}
+    NODE_CLASS_MAPPINGS = {
+        "FastModelLoader": FastModelLoader,
+        "FastDiffusionModelLoader": FastDiffusionModelLoader,
+        "OutpaintDirectionSelector": OutpaintDirectionSelector,
+        "PrimitiveCombo": OutpaintDirectionSelector,
+        "OutpaintDirectionalPad": OutpaintDirectionalPad,
+    }
 
-NODE_DISPLAY_NAME_MAPPINGS = {
-    "FastModelLoader": "⚡ Fast Model Checkpoint Loader (Pread)",
-    "FastDiffusionModelLoader": "⚡ Fast Diffusion Model Loader (Pread)",
-    "OutpaintDirectionalPad": "📐 Outpaint Directional Canvas Pad",
-}
+    NODE_DISPLAY_NAME_MAPPINGS = {
+        "FastModelLoader": "⚡ Fast Model Checkpoint Loader (Pread)",
+        "FastDiffusionModelLoader": "⚡ Fast Diffusion Model Loader (Pread)",
+        "OutpaintDirectionSelector": "📐 Outpaint Direction Selector",
+        "PrimitiveCombo": "📐 Outpaint Direction Selector (Primitive)",
+        "OutpaintDirectionalPad": "📐 Outpaint Directional Canvas Pad",
+    }
+except Exception as e:
+    logger.warning(f"Could not import node classes: {e}")
+    NODE_CLASS_MAPPINGS = {}
+    NODE_DISPLAY_NAME_MAPPINGS = {}
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]

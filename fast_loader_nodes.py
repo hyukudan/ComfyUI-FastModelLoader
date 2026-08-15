@@ -85,6 +85,37 @@ class FastDiffusionModelLoader:
         return (model,)
 
 
+class OutpaintDirectionSelector:
+    """
+    Outpaint Direction Selector node for choosing expansion direction in outpaint workflows.
+    """
+    DIRECTION_MODES = [
+        "center (50/50 both sides)",
+        "bottom (outpaint TOP only / cielo)",
+        "top (outpaint BOTTOM only / suelo)",
+        "custom_vertical_bias (0.0=bottom, 1.0=top)",
+    ]
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "direction": (s.DIRECTION_MODES, {"default": "center (50/50 both sides)"}),
+            },
+            "optional": {
+                "custom_bias": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05}),
+            }
+        }
+
+    RETURN_TYPES = ("COMBO", "FLOAT")
+    RETURN_NAMES = ("direction", "custom_bias")
+    FUNCTION = "get_direction"
+    CATEGORY = "image/transform"
+    DESCRIPTION = "Selects outpaint expansion direction (top, bottom, center 50/50, custom)."
+
+    def get_direction(self, direction, custom_bias=0.5):
+        return (direction, custom_bias)
+
+
 class OutpaintDirectionalPad:
     """
     Intelligent Directional Outpaint Canvas Expander with Boundary Feathering.
@@ -108,7 +139,7 @@ class OutpaintDirectionalPad:
                 "target_height": ("INT", {"default": 1280, "min": 64, "max": 16384, "step": 8}),
                 "feathering": ("INT", {"default": 48, "min": 0, "max": 512, "step": 1}),
                 "direction": (s.DIRECTION_MODES, {"default": "center (50/50 both sides)"}),
-                "upscale_method": (s.UPSCALE_METHODS, {"default": "lanczos"}),
+                "upscale_method": (s.UPSCALE_METHODS, {"default": "bicubic"}),
             },
             "optional": {
                 "mask": ("MASK",),
