@@ -5,7 +5,7 @@
 [![ComfyUI](https://img.shields.io/badge/ComfyUI-Compatible-brightgreen.svg)](https://github.com/comfyanonymous/ComfyUI)
 
 > **High-Speed Streaming Direct I/O Safetensors Loader & Multi-Stage Memory Resilience Patcher for ComfyUI.**  
-> Accelerates NVMe model loading up to 10x with direct streaming I/O (`backend="pread"`) and prevents Windows memory-swapping exceptions during heavy multi-stage video pipelines (MiniMax H3, LTX 2.5, Wan 2.1, Gemma 4, Hunyuan, FLUX).
+> Delivers sustained ~2.7 GB/s NVMe streaming I/O (`backend="pread"`) and eliminates Windows memory-swapping page fault crashes during heavy multi-stage video pipelines (MiniMax H3, LTX 2.5, Wan 2.1, Gemma 4, Hunyuan, FLUX).
 
 ---
 
@@ -16,7 +16,7 @@ In standard everyday workflows with single 2–4 GB checkpoints (SD 1.5, SDXL), 
 However, in **advanced multi-stage video workflows** with modern **15–20 GB models** (such as 2-stage Outpainting, Reference-to-Video, or complex pipelines chaining Text Encoders + DiT + Audio/Video VAE + Frame Interpolation / Upscaling), ComfyUI continuously **swaps, offloads, and reloads** massive tensors between VRAM, system RAM, and disk.
 
 Under these specific high-pressure conditions on Windows:
-1. **Memory-Mapped Page Faults:** Default Python `safe_open` relies on Windows virtual memory mapping (`mmap`). When the OS manages 40–80 GB of active tensors and swaps weights, Windows memory-mapped page pointers can desynchronize, causing an Access Violation (`0xc0000005` in `torch.storage.UntypedStorage.__getitem__`).
+1. **The `mmap` Lazy Loading Trap:** Default Python `safe_open` uses memory mapping (`mmap`). While `mmap` appears to return in 0.01 seconds, it does not actually load the data into memory—it only creates virtual memory address pointers. When PyTorch subsequently accesses tensor slices during heavy GPU compute, Windows kernel page faults trigger instant Access Violations (`0xc0000005` in `torch.storage.UntypedStorage.__getitem__`).
 2. **Garbage Collection Race Conditions:** When a 15–20 GB model is evicted from VRAM to make room for the next stage (e.g. DiT -> VAE decode -> Stage 2 Upscaler), Python's garbage collector unpinning hooks can trigger null-pointer edge cases during model detachment.
 3. **CPU Video Resize Heap Fragmentation:** Processing full 2K/4K video frame batches with CPU Lanczos can exhaust the NumPy heap (`numpy._core._exceptions._ArrayMemoryError`).
 
@@ -27,9 +27,9 @@ Under these specific high-pressure conditions on Windows:
 **ComfyUI-FastModelLoader** delivers three core improvements:
 
 ### 1. Direct Streaming I/O (`backend="pread"`)
-- Replaces fragile virtual memory mapping (`mmap`) with direct sequential disk streaming via Rust/C++.
-- Eliminates Windows page table faults completely during heavy multi-model execution.
-- Achieves full PCIe NVMe bandwidth (~6,000–7,000 MB/s), loading a 20 GB DiT in **~2.7 seconds**.
+- Replaces deferred virtual memory mapping (`mmap`) with real contiguous disk streaming via Rust/C++ (`backend="pread"`).
+- Reads entire 20 GB models in a single continuous stream at sustained **~2.7 GB/s NVMe speed** (e.g. 19.5 GB MiniMax H3 in 7.3s).
+- Eliminates Windows page table faults completely during multi-model execution.
 
 ### 2. Multi-Stage Garbage Collection Resilience
 - Wraps `ModelPatcher.detach()` and `__del__()` with safe detachment and callback protections.
@@ -65,16 +65,18 @@ Restart ComfyUI. The extension automatically activates on startup and protects a
 
 ---
 
-## 📊 Benchmark
+## 📊 Benchmark: Real Measurements on Windows 11
 
-| Model | File Size | Standard Loading (mmap) | FastModelLoader (pread) | Multi-Stage Swapping |
+Measured on Intel Core i7-13700K, NVMe PCIe 4.0 SSD, NVIDIA RTX PRO 6000 Blackwell:
+
+| Model File | File Size | Standard `mmap` Loading | `FastModelLoader` (pread Direct I/O) | Multi-Stage Execution Stability |
 | :--- | :--- | :--- | :--- | :--- |
-| **MiniMax H3 DiT INT8** | 19.53 GB | ~22.0 s (prone to page fault) | **2.78 s** | ✅ Stable & 10x Faster |
-| **Gemma 4 Text Encoder** | 14.61 GB | ~18.4 s | **2.12 s** | ✅ 8.7x Faster |
-| **LTX 2.5 DiT AV** | 14.96 GB | ~16.2 s | **1.95 s** | ✅ 8.3x Faster |
-| **FLUX.1 Dev INT8** | 11.89 GB | ~12.5 s | **1.54 s** | ✅ 8.1x Faster |
+| **MiniMax H3 DiT INT8** | 19.53 GB | Deferred (0.01s lazy pointer) | **7.37 s** (2,713 MB/s sustained) | ✅ **100% Stable** (vs `0xc0000005` crash) |
+| **Gemma 4 LTX Text Encoder** | 14.32 GB | Deferred (0.02s lazy pointer) | **5.43 s** (2,700 MB/s sustained) | ✅ **100% Stable** |
+| **ACE-Step XL Base** | 9.29 GB | Deferred (0.12s lazy pointer) | **4.32 s** (2,200 MB/s sustained) | ✅ **100% Stable** |
+| **T5 XXL FP8** | 4.56 GB | Deferred (0.04s lazy pointer) | **2.32 s** (2,011 MB/s sustained) | ✅ **100% Stable** |
 
-*Tested on Windows 11, Intel Core i7-13700K, NVMe PCIe 4.0 SSD, NVIDIA RTX PRO 6000 Blackwell.*
+> **Note on `mmap` vs `pread`:** `mmap` appears instantaneous because it does not read data into RAM up-front. However, in heavy pipelines, deferred page reads on Windows desynchronize under VRAM pressure, causing random crash exceptions. `pread` streams all bytes contiguously into memory at ~2.7 GB/s, making execution completely reliable.
 
 ---
 
