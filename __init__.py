@@ -1,5 +1,5 @@
 """
-ComfyUI-FastModelLoader: High-Speed Streaming Safetensors Loader, Memory Resilience & Outpaint Tools
+ComfyUI-FastModelLoader: High-Speed Streaming Safetensors Loader & Memory Resilience Patcher
 Copyright (c) 2026 hyukudan
 Licensed under the MIT License
 """
@@ -95,22 +95,16 @@ if _original_lanczos is not None:
 logger.info("[ComfyUI-FastModelLoader] Direct pread I/O streaming, GC resilience & Safe Video Resizer active.")
 
 try:
-    from .fast_loader_nodes import FastModelLoader, FastDiffusionModelLoader, OutpaintDirectionSelector, OutpaintDirectionalPad
+    from .fast_loader_nodes import FastModelLoader, FastDiffusionModelLoader
 
     NODE_CLASS_MAPPINGS = {
         "FastModelLoader": FastModelLoader,
         "FastDiffusionModelLoader": FastDiffusionModelLoader,
-        "OutpaintDirectionSelector": OutpaintDirectionSelector,
-        "PrimitiveCombo": OutpaintDirectionSelector,
-        "OutpaintDirectionalPad": OutpaintDirectionalPad,
     }
 
     NODE_DISPLAY_NAME_MAPPINGS = {
         "FastModelLoader": "⚡ Fast Model Checkpoint Loader (Pread)",
         "FastDiffusionModelLoader": "⚡ Fast Diffusion Model Loader (Pread)",
-        "OutpaintDirectionSelector": "📐 Outpaint Direction Selector",
-        "PrimitiveCombo": "📐 Outpaint Direction Selector (Primitive)",
-        "OutpaintDirectionalPad": "📐 Outpaint Directional Canvas Pad",
     }
 except Exception as e:
     logger.warning(f"Could not import node classes: {e}")

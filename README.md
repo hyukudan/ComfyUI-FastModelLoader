@@ -18,6 +18,7 @@ However, in **advanced multi-stage video workflows** with modern **15–20 GB mo
 Under these specific high-pressure conditions on Windows:
 1. **Memory-Mapped Page Faults:** Default Python `safe_open` relies on Windows virtual memory mapping (`mmap`). When the OS manages 40–80 GB of active tensors and swaps weights, Windows memory-mapped page pointers can desynchronize, causing an Access Violation (`0xc0000005` in `torch.storage.UntypedStorage.__getitem__`).
 2. **Garbage Collection Race Conditions:** When a 15–20 GB model is evicted from VRAM to make room for the next stage (e.g. DiT -> VAE decode -> Stage 2 Upscaler), Python's garbage collector unpinning hooks can trigger null-pointer edge cases during model detachment.
+3. **CPU Video Resize Heap Fragmentation:** Processing full 2K/4K video frame batches with CPU Lanczos can exhaust the NumPy heap (`numpy._core._exceptions._ArrayMemoryError`).
 
 ---
 
@@ -34,8 +35,8 @@ Under these specific high-pressure conditions on Windows:
 - Wraps `ModelPatcher.detach()` and `__del__()` with safe detachment and callback protections.
 - Guarantees seamless multi-stage model swapping (Stage 1 -> Stage 2, Text Encoder -> DiT -> VAE -> VFI) without unexpected process exits.
 
-### 3. Directional Canvas Outpainting
-- Native canvas expander (`OutpaintDirectionalPad`) with directional alignment (`center 50/50`, `bottom -> outpaint top/sky`, `top -> outpaint bottom/ground`, `left`, `right`, `custom_bias`) and alpha feathering.
+### 3. Safe Video Batch Resizer
+- Protects video frame resizing at 2K/4K resolutions by routing large batches directly through GPU PyTorch interpolation, avoiding CPU host RAM exhaustion.
 
 ---
 
@@ -45,7 +46,6 @@ Under these specific high-pressure conditions on Windows:
 | :--- | :--- | :--- |
 | `FastModelLoader` | **⚡ Fast Model Checkpoint Loader (Pread)** | High-speed direct I/O checkpoint loader. |
 | `FastDiffusionModelLoader` | **⚡ Fast Diffusion Model Loader (Pread)** | Standalone UNet/DiT model loader (MiniMax H3, LTX 2.5, Wan 2.1, FLUX). |
-| `OutpaintDirectionalPad` | **📐 Outpaint Directional Canvas Pad** | Expands canvas to target resolution with directional placement (`center`, `top`, `bottom`, `left`, `right`, `custom_bias`) and edge feathering. |
 
 ---
 
