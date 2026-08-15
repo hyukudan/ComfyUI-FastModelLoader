@@ -1,0 +1,17 @@
+[project]
+name = "comfyui-fastmodelloader"
+version = "1.0.0"
+description = "High-Speed Streaming Safetensors Loader & Memory Resilience Patcher for ComfyUI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "hyukudan" }
+]
+dependencies = [
+    "torch>=2.0.0",
+    "safetensors>=0.4.0"
+]
+
+[project.urls]
+Repository = "https://github.com/hyukudan/ComfyUI-FastModelLoader"
