@@ -170,6 +170,26 @@ try:
 except Exception:
     pass
 
+# 5. Bulletproof VAE Decode Tiled VRAM Unloader (prevents 4K VAE OOM by unloading DiT models before tiled decode)
+try:
+    import comfy.sd
+    _orig_vae_decode_tiled = getattr(comfy.sd.VAE, 'decode_tiled', None)
+    if _orig_vae_decode_tiled is not None:
+        def _safe_vae_decode_tiled(self, samples_in, *args, **kwargs):
+            try:
+                import comfy.model_management as mm
+                mm.unload_all_models()
+                mm.soft_empty_cache(True)
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+            return _orig_vae_decode_tiled(self, samples_in, *args, **kwargs)
+
+        comfy.sd.VAE.decode_tiled = _safe_vae_decode_tiled
+except Exception:
+    pass
+
 logger.info("[ComfyUI-FastModelLoader] Direct pread I/O streaming, GC resilience & Safe Video Resizer active.")
 
 try:
