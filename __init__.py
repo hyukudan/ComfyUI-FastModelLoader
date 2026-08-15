@@ -1,5 +1,5 @@
 """
-ComfyUI-FastModelLoader: High-Speed Streaming Safetensors Loader & Memory Resilience Patcher
+ComfyUI-FastModelLoader: High-Speed Streaming Safetensors Loader, Memory Resilience & Safe Video Resizer
 Copyright (c) 2026 hyukudan
 Licensed under the MIT License
 """
@@ -70,7 +70,30 @@ def _safe_del(self):
 
 comfy.model_patcher.ModelPatcher.__del__ = _safe_del
 
-logger.info("[ComfyUI-FastModelLoader] Direct pread I/O streaming & GC resilience active.")
+# 3. Safe Video Batch Resizer (prevents numpy._ArrayMemoryError when scaling video batches at 2K)
+_original_lanczos = getattr(comfy.utils, 'lanczos', None)
+
+def _safe_lanczos(samples, width, height):
+    # For video batches (>8 frames) or high-res, use PyTorch GPU bicubic to prevent CPU PIL/NumPy heap exhaustion
+    if samples.shape[0] > 8 or (samples.shape[-1] * samples.shape[-2] > 1024 * 1024):
+        s = samples if samples.shape[1] in (1, 3, 4) else samples.movedim(-1, 1)
+        out = torch.nn.functional.interpolate(s, size=(height, width), mode="bicubic", align_corners=False)
+        if samples.shape[1] not in (1, 3, 4):
+            out = out.movedim(1, -1)
+        return out
+    try:
+        return _original_lanczos(samples, width, height)
+    except Exception:
+        s = samples if samples.shape[1] in (1, 3, 4) else samples.movedim(-1, 1)
+        out = torch.nn.functional.interpolate(s, size=(height, width), mode="bicubic", align_corners=False)
+        if samples.shape[1] not in (1, 3, 4):
+            out = out.movedim(1, -1)
+        return out
+
+if _original_lanczos is not None:
+    comfy.utils.lanczos = _safe_lanczos
+
+logger.info("[ComfyUI-FastModelLoader] Direct pread I/O streaming, GC resilience & Safe Video Resizer active.")
 
 from .fast_loader_nodes import FastModelLoader, FastDiffusionModelLoader, OutpaintDirectionalPad
 
